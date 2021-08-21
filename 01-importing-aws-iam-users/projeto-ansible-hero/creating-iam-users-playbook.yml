@@ -1,0 +1,30 @@
+- name:  criando usuarios IAM a partir da leitura de um arquivo cvs
+  hosts: localhost
+  gather_facts: no
+  tasks:
+  - name: lendo informações de usuários
+    read_csv:
+      path: usuarios2.csv
+    register: usuarios
+  
+  - name: criando usuários IAM
+    command: >
+      aws iam create-user --user-name {{usuario.username}}
+
+    loop: "{{ usuarios.list }}"
+    loop_control:
+      loop_var: usuario
+
+  - name: criando perfis de usuários IAM
+    command: >
+      aws iam create-login-profile --password-reset-required --user-name {{usuario.username}} --password {{usuario.senha}}
+    loop: "{{ usuarios.list }}"
+    loop_control:
+      loop_var: usuario      
+
+  - name: adicionando usuários a grupos
+    command: >
+      aws iam add-user-to-group --group-name {{usuario.grupo}} --user-name {{usuario.username}}
+    loop: "{{ usuarios.list }}"
+    loop_control:
+      loop_var: usuario
