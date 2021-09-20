@@ -1,0 +1,196 @@
+Description: >-
+  Create infra for deploy a simple web application in python.
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  InstanceTypeParameter:
+    Type: String
+    Default: t2.micro
+    Description: Enter instance size. Default is t2.micro.
+  AMI:
+    Type: String
+    Default: ami-087c17d1fe0178315
+    Description: The Linux AMI to use.
+  SSHKey:
+    Type: String
+    Default: victor-dev
+    Description: The Key for SSH communications.
+  DBName:
+    Default: MyDatabase
+    Description: The database name
+    Type: String
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  DBUser:
+    Default: admin
+    NoEcho: 'true'
+    Description: The database admin account username
+    Type: String
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  DBPassword:
+    Default: admin123456
+    NoEcho: 'true'
+    Description: The database admin account password
+    Type: String
+    MinLength: '1'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]+'
+    ConstraintDescription: must contain only alphanumeric characters.
+  DBAllocatedStorage:
+    Default: '5'
+    Description: The size of the database (Gb)
+    Type: Number
+    MinValue: '5'
+    MaxValue: '1024'
+    ConstraintDescription: must be between 5 and 1024Gb.
+  DBInstanceClass:
+    Description: The database instance type
+    Type: String
+    Default: db.t2.small
+    AllowedValues: [db.t1.micro, db.m1.small, db.m1.medium, db.m1.large, db.m1.xlarge,
+      db.m2.xlarge, db.m2.2xlarge, db.m2.4xlarge, db.m3.medium, db.m3.large, db.m3.xlarge,
+      db.m3.2xlarge, db.m4.large, db.m4.xlarge, db.m4.2xlarge, db.m4.4xlarge, db.m4.10xlarge,
+      db.r3.large, db.r3.xlarge, db.r3.2xlarge, db.r3.4xlarge, db.r3.8xlarge, db.m2.xlarge,
+      db.m2.2xlarge, db.m2.4xlarge, db.cr1.8xlarge, db.t2.micro, db.t2.small, db.t2.medium,
+      db.t2.large]
+    ConstraintDescription: must select a valid database instance type.    
+Resources:
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+      - Key: Name
+        Value:  !Join ['', ["VPC-", !Ref "AWS::StackName"]]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:      
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: '10.0.0.0/24'
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Name
+        Value:  Public subnet
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: '10.0.1.0/24'
+      Tags:
+      - Key: Name
+        Value:  Private subnet A
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [2, !GetAZs '']
+      CidrBlock: '10.0.2.0/24'
+      Tags:
+      - Key: Name
+        Value:  Private subnet B
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref PublicSubnet
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGateway
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref RouteTable
+
+  EC2InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: "EC2 Target Group"
+      GroupDescription: "A security group for EC2Instance"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMI
+      InstanceType:
+        Ref: InstanceTypeParameter
+      KeyName: !Ref SSHKey
+      SubnetId: !Ref PublicSubnet      
+      SecurityGroupIds: 
+        - !GetAtt EC2InstanceSecurityGroup.GroupId
+      Tags:
+        - Key: hostname
+          Value: awsuse1app01
+  
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Open database for access
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '3306'
+        ToPort: '3306'
+        SourceSecurityGroupId: !GetAtt EC2InstanceSecurityGroup.GroupId 
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: 'Subnets for RDS'
+      SubnetIds:
+      - !Ref PrivateSubnetA
+      - !Ref PrivateSubnetB
+  
+  MasterDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref DBName
+      DBInstanceIdentifier: 'demo'
+      DBSubnetGroupName: !Ref DBSubnetGroup 
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: 'MySQL'
+      EngineVersion: '8.0.23'
+      StorageType: 'gp2'
+      MasterUsername: !Ref DBUser
+      MasterUserPassword: !Ref DBPassword
+      VPCSecurityGroups:
+      - !Ref RDSSecurityGroup
+      Tags:
+      - Key: Name
+        Value: Master Database
+    DeletionPolicy: Snapshot
